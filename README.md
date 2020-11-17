@@ -3,9 +3,8 @@ Smol
 
 A static site generater that doesn't have _opinions_. No magic directories or special variables. It's still under construction, so check back later.
 
-A fork of [![makesite][SOURCE-BADGE]](https://github.com/sunainapai/makesite) although by now it's virtually unrecognizable.
-
-[![MIT License][LICENSE-BADGE]](LICENSE.md)
+This started as a fork of [Makesite](https://github.com/sunainapai/makesite)
+[MIT License](LICENSE.md)
 
 Contents
 --------

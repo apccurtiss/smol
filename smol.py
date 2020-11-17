@@ -50,7 +50,7 @@ def build_page(filepath, destination, global_params):
 
         global_params.update(headers)
         template = parse_smol_file(content)
-        output = eval_smol_template(template, global_params).encode()
+        output = eval_smol_template(template, filepath, global_params).encode()
     else:
         with open(filepath, 'rb') as f:
             output = f.read()
