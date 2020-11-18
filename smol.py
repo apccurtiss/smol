@@ -1,12 +1,14 @@
-import datetime
-import functools
 import json
 import logging
 import os
+from pathlib import PurePath
 import re
-import sys
+import time
+
 import argparse
 import shutil
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
 
 from lib.smol_lang import eval_smol_template, parse_smol_file
 
@@ -53,20 +55,25 @@ def build_page(filepath, destination, global_params):
         f.write(output)
 
 def build_site(target, output_path, params):
+    watchpaths = []
+
     for (dirpath, _dirnames, filenames) in os.walk(target):
         for filename in filenames:
             source = os.path.join(dirpath, filename)
             destination = os.path.join(output_path, source)
             build_page(source, destination, params)
+            watchpaths.append(source)
+
+    return watchpaths
 
 def main():
     parser = argparse.ArgumentParser(description='Build a website!')
     parser.add_argument('-r', '--root', nargs='?', action='store', default='.',
-        help='source root directory')
+                        help='source root directory')
     parser.add_argument('-o', '--out', action='store', nargs='?', default='./_site',
-        help='output folder')
+                        help='output folder')
     parser.add_argument('-s', '--static', action='store', nargs='*', default=[],
-        help='static directories will be copied without modification')
+                        help='static directories will be copied without modification')
 
     args = parser.parse_args()
 
@@ -93,7 +100,30 @@ def main():
         shutil.copytree(static_dir, params['out'])
 
     # Write!
-    build_site(params['root'], params['out'], params)
+    watchpaths = build_site(params['root'], params['out'], params)
+    print('[*] Compilation successful')
+
+    # Keep watching until manually cancelled.
+    class Handler(FileSystemEventHandler):
+        @staticmethod
+        def on_any_event(event):
+            if event.event_type == 'modified' and event.src_path in watchpaths:
+                print(f'[*] Recompiling {event.src_path}')
+                build_page(event.src_path, os.path.join(params['out'], event.src_path), params)
+
+    # Initialize Observer
+    observer = Observer()
+    observer.schedule(Handler(), params['root'], recursive=True)
+
+    # Start the observer
+    observer.start()
+    try:
+        print('[*] Watching for changes...')
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        observer.stop()
+    observer.join()
 
 
 if __name__ == '__main__':

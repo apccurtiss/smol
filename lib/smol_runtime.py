@@ -11,7 +11,7 @@ def list_files(path_obj):
     fullpath = os.path.join(dirname, path)
     _, _, filenames = os.walk(fullpath).__next__()
 
-    return SmolList([os.path.join(dirname, filename) for filename in filenames])
+    return SmolList([SmolStr(os.path.join(dirname, filename)) for filename in filenames])
 
 runtime = {
     'list_files': SmolFn(fn=list_files)

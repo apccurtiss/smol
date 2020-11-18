@@ -110,7 +110,7 @@ def to_str(node):
     elif isinstance(node, SmolObj):
         return str({key: to_str(value) for key, value in node.fields.items()})
     else:
-        raise Exception('Internal error - this should never happen.')
+        raise Exception('Internal error - tried to stringify {}'.format(node))
 
 def eval_smol_template(ast: SmolNode, filepath: str, params: Dict[str, Any]):
     if isinstance(ast, SmolStr):

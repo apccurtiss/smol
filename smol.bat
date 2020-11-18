@@ -1,3 +1,3 @@
 @echo off
-python3 %~dp0\src\smol.py %*
+python3 %~dp0\smol.py %*
 pause
