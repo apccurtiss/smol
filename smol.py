@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 import datetime
 import functools
 import json
@@ -7,11 +5,10 @@ import logging
 import os
 import re
 import sys
-
 import argparse
 import shutil
 
-from smol_lang import eval_smol_template, parse_smol_file
+from lib.smol_lang import eval_smol_template, parse_smol_file
 
 logging.basicConfig()
 
@@ -46,7 +43,7 @@ def build_page(filepath, destination, global_params):
 
         global_params.update(headers)
         template = parse_smol_file(content)
-        output = eval_smol_template(template, filepath, global_params).encode()
+        output = eval_smol_template(template, filepath, global_params).value.encode()
     else:
         with open(filepath, 'rb') as f:
             output = f.read()
