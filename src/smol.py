@@ -41,12 +41,8 @@ def read_content(filename):
     return headers, content
 
 def build_page(filepath, destination, global_params):
-    print('Building {} -> {}'.format(filepath, destination))
-
-
     if filepath.endswith('html'):
         headers, content = read_content(filepath)
-        print('Parsed headers: {}'.format(headers))
 
         global_params.update(headers)
         template = parse_smol_file(content)
@@ -60,7 +56,6 @@ def build_page(filepath, destination, global_params):
         f.write(output)
 
 def build_site(target, output_path, params):
-    print('Building site from {} into {}'.format(target, output_path))
     for (dirpath, _dirnames, filenames) in os.walk(target):
         for filename in filenames:
             source = os.path.join(dirpath, filename)
@@ -69,19 +64,24 @@ def build_site(target, output_path, params):
 
 def main():
     parser = argparse.ArgumentParser(description='Build a website!')
-    parser.add_argument('target', action='store', help='target folder', default='.')
+    parser.add_argument('-r', '--root', nargs='?', action='store', default='.',
+        help='source root directory')
+    parser.add_argument('-o', '--out', action='store', nargs='?', default='./_site',
+        help='output folder')
+    parser.add_argument('-s', '--static', action='store', nargs='*', default=[],
+        help='static directories will be copied without modification')
 
     args = parser.parse_args()
 
-    # Default parameters.
+    # Use argument parameters.
     params = {
-        'target': args.target,
-        'out': './_site',
-        'static_dir': './static',
+        'root': args.root,
+        'out': args.out,
+        'static_dirs': args.static,
     }
 
-    # If smol.json exists, load it first.
-    if os.path.isfile('smol.json'):
+    # If smol.json exists, load it.
+    if os.path.isfile(os.path.join(args.root, 'smol.json')):
         with open('smol.json') as f:
             params.update(json.loads(f.read()))
 
@@ -89,11 +89,14 @@ def main():
     if os.path.isdir(params['out']):
         shutil.rmtree(params['out'])
 
-    if os.path.isdir(params['static_dir']):
-        shutil.copytree(params['static_dir'], params['out'])
+    for static_dir in params['static_dirs']:
+        if not os.path.isdir(static_dir):
+            raise Exception('Directory does not exist: {}'.format(static_dir))
+
+        shutil.copytree(static_dir, params['out'])
 
     # Write!
-    build_site(params['target'], params['out'], params)
+    build_site(params['root'], params['out'], params)
 
 
 if __name__ == '__main__':

@@ -75,7 +75,6 @@ def parse_smol_file(code: str):
     # operator soup needed to make that happen.
     for statement, next_html in zip(*[iter(statements[1:])]*2):
         statement = statement.strip()
-        print('On statement: {}'.format(statement))
         if statement.startswith('for'):
             # Parse out the parts of the loop. Explode if we can't.
             match = re.match(r'for (.+?) in (.+?)$', statement)
@@ -117,7 +116,6 @@ def parse_smol_file(code: str):
     if len(stack) > 1:
         raise Exception('Unclosed for statement!')
     
-    print(stack[0])
     return stack[0]
 
 def eval_smol_template(ast: SmolNode, filepath: str, params: Dict[str, Any]):

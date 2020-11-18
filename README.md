@@ -4,6 +4,7 @@ Smol
 A static site generater that doesn't have _opinions_. No magic directories or special variables. It's still under construction, so check back later.
 
 This started as a fork of [Makesite](https://github.com/sunainapai/makesite)
+
 [MIT License](LICENSE.md)
 
 Contents
