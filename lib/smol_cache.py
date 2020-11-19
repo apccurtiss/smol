@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from datetime import datetime
 import os
 import re
 from typing import Dict
@@ -9,6 +10,7 @@ from lib.smol_ast import SmolStr
 class SmolFile:
     path: str
     content: str
+    updated: datetime = field(default_factory=datetime.now)
     headers: Dict[str, str] = field(default_factory=dict)
     is_html: bool = field(default=False)
 
@@ -45,10 +47,10 @@ class SmolFileCache:
 
             return SmolFile(path=filepath, content=content)
 
-    def get(self, filepath):
+    def get(self, filepath, invalidate=False):
         norm_filepath = os.path.normpath(filepath)
 
-        if norm_filepath not in self.cache:
+        if invalidate or norm_filepath not in self.cache:
             self.cache[norm_filepath] = self._load(norm_filepath)
         
         return self.cache[norm_filepath]

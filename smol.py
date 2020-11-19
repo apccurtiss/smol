@@ -1,57 +1,32 @@
+from datetime import datetime, timedelta
 import json
 import logging
 import os
-import re
+import sys
 import time
 
 import argparse
 from httpwatcher import HttpWatcherServer
-from tornado.ioloop import IOLoop
 import shutil
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
+from lib.smol_cache import cache
 from lib.smol_lang import eval_smol_template, parse_smol_file
 
 logging.basicConfig()
 logging.getLogger('tornado').setLevel(logging.ERROR)
 
 
-def read_headers(text):
-    """Parse headers and return the index where they end."""
-    headers = {}
-    end = 0
-    for match in re.finditer(r'\s*<!--\s*(.+?)\s*:\s*(.+?)\s*-->\s*', text):
-        if not match.group(1):
-            break
-
-        headers[match.group(1)] = match.group(2)
-        end = match.end()
-
-    return headers, end
-
-def read_content(filename):
-    """Read headers and content from a file."""
-    with open(filename) as f:
-        content = f.read()
-
-    headers, end = read_headers(content)
-
-    # Separate content from headers.
-    content = content[end:]
-
-    return headers, content
-
 def build_page(filepath, destination, global_params):
-    if filepath.endswith('html'):
-        headers, content = read_content(filepath)
+    file_obj = cache.get(filepath, invalidate=True)
 
-        global_params.update(headers)
-        template = parse_smol_file(content)
+    if file_obj.is_html:
+        global_params.update(file_obj.headers)
+        template = parse_smol_file(file_obj.content)
         output = eval_smol_template(template, filepath, global_params).value.encode()
     else:
-        with open(filepath, 'rb') as f:
-            output = f.read()
+        output = file_obj.content
 
     os.makedirs(os.path.dirname(destination), exist_ok=True)
     with open(destination, 'wb') as f:
@@ -109,16 +84,20 @@ def main():
     print('[*] Compilation successful')
 
     # Keep watching until manually cancelled.
-    class Handler(FileSystemEventHandler):
+    class WatchHandler(FileSystemEventHandler):
         @staticmethod
         def on_any_event(event):
             if event.event_type == 'modified' and event.src_path in watchpaths:
+                # Skip duplicate events that are within a second of each other
+                if datetime.now() - cache.get(event.src_path).updated < timedelta(seconds=1):
+                    return
+
                 print(f'[*] Recompiling {event.src_path}')
                 build_page(event.src_path, os.path.join(params['out'], event.src_path), params)
 
     # Initialize Observer
     observer = Observer()
-    observer.schedule(Handler(), params['root'], recursive=True)
+    observer.schedule(WatchHandler(), params['root'], recursive=True)
 
     # Start the observer
     try:
@@ -140,13 +119,16 @@ def main():
             server.listen()
             print('[*] Serving from http://{}:{}'.format(host, port))
 
-        IOLoop.current().start()
+        while True:
+            time.sleep(1)
     except KeyboardInterrupt:
+        print('[*] Shutting down...')
         observer.stop()
         if server:
             server.shutdown()
 
     observer.join()
+    sys.exit(0)
 
 
 if __name__ == '__main__':
