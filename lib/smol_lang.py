@@ -2,7 +2,7 @@ import copy
 import os
 import re
 
-from lib.smol_ast import *
+from lib.smol_ast import * # pylint: disable=unused-wildcard-import
 from lib.smol_cache import cache
 from lib.smol_runtime import runtime
 

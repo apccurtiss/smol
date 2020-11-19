@@ -1,9 +1,13 @@
+'''
+Smol, an unopinionated static site generator.
+'''
 from datetime import datetime, timedelta
 import json
 import logging
 import os
 import shutil
 import sys
+import time
 
 import argparse
 from httpwatcher import HttpWatcherServer
@@ -19,6 +23,13 @@ logging.getLogger('tornado').setLevel(logging.ERROR)
 
 
 def build_page(filepath, destination, global_params):
+    '''Builds and saves a single page.
+
+    Params:
+        filepath: Source filepath
+        destination: Destination filepath
+        global_params: Param dict
+    '''
     file_obj = cache.get(filepath, invalidate=True)
 
     if file_obj.is_html:
@@ -29,10 +40,20 @@ def build_page(filepath, destination, global_params):
         output = file_obj.content
 
     os.makedirs(os.path.dirname(destination), exist_ok=True)
-    with open(destination, 'wb') as f:
-        f.write(output)
+    with open(destination, 'wb') as outfile:
+        outfile.write(output)
 
 def build_site(target, output_path, params):
+    '''Recursively builds a given directory.
+
+    Params:
+        target: Source directory
+        output_path: Destination directory
+        params: Param dict
+
+    Returns:
+        A list of the files built
+    '''
     watchpaths = []
 
     for (dirpath, _dirnames, filenames) in os.walk(target):
@@ -45,6 +66,7 @@ def build_site(target, output_path, params):
     return watchpaths
 
 def main():
+    '''Parses args and runs accordingly'''
     parser = argparse.ArgumentParser(description='Build a website!')
     parser.add_argument('-r', '--root', nargs='?', action='store', default='.',
                         help='source root directory')
@@ -66,8 +88,8 @@ def main():
 
     # If smol.json exists, load it.
     if os.path.isfile(os.path.join(args.root, 'smol.json')):
-        with open('smol.json') as f:
-            params.update(json.loads(f.read()))
+        with open('smol.json') as infile:
+            params.update(json.loads(infile.read()))
 
     # Create output directory.
     if os.path.isdir(params['out']):
@@ -83,8 +105,8 @@ def main():
     watchpaths = build_site(params['root'], params['out'], params)
     print('[*] Compilation successful')
 
-    # Keep watching until manually cancelled.
     class WatchHandler(FileSystemEventHandler):
+        '''Rebuilds pages that get modified'''
         @staticmethod
         def on_any_event(event):
             if event.event_type == 'modified' and event.src_path in watchpaths:
@@ -119,7 +141,10 @@ def main():
             server.listen()
             print('[*] Serving from http://{}:{}'.format(host, port))
 
-        IOLoop.current().start()
+            IOLoop.current().start()
+
+        while True:
+            time.sleep(1)
     except KeyboardInterrupt:
         print('[*] Shutting down...')
         observer.stop()
