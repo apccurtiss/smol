@@ -9,8 +9,15 @@ class HTML(SmolNode):
     value: str
 
 @dataclass
+class SmolFn(SmolNode):
+    fn: Callable[[Any], Any]
+
+@dataclass
 class SmolStr(SmolNode):
     value: str
+
+    def split(self, _ast, _filepath, _params, delim):
+        return [SmolStr(chunk) for chunk in self.value.split(delim)]
 
 @dataclass
 class SmolList(SmolNode):
@@ -19,10 +26,6 @@ class SmolList(SmolNode):
 @dataclass
 class SmolObj(SmolNode):
     fields: Dict[str, SmolNode]
-
-@dataclass
-class SmolFn(SmolNode):
-    fn: Callable[[Any], Any]
 
 @dataclass
 class SmolVar(SmolNode):

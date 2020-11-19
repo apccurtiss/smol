@@ -3,6 +3,7 @@ import os
 import re
 
 from lib.smol_ast import *
+from lib.smol_cache import cache
 from lib.smol_runtime import runtime
 
 var_re = re.compile(r'\w+?$')
@@ -10,6 +11,7 @@ string_re = re.compile(r'[\'"](.*?)[\'"]$')
 call_re = re.compile(r'(.+)\s*\(\s*(.+?)\s*\)\s*$')
 field_access_re = re.compile(r'(.+)\.\s*(.\w+)$')
 index_access_re = re.compile(r'(.+)\[\s*(.\d+)\s*]$')
+
 def parse_smol_expr(code: str):
     code = code.strip()
 
@@ -110,7 +112,7 @@ def to_str(node):
     elif isinstance(node, SmolObj):
         return str({key: to_str(value) for key, value in node.fields.items()})
     else:
-        raise Exception('Internal error - tried to stringify {}'.format(node))
+        raise Exception('Internal error - tried to stringify {}'.format(type(node)))
 
 def eval_smol_template(ast: SmolNode, filepath: str, params: Dict[str, Any]):
     if isinstance(ast, SmolStr):
@@ -130,7 +132,7 @@ def eval_smol_template(ast: SmolNode, filepath: str, params: Dict[str, Any]):
 
         if not isinstance(first, SmolStr) or not isinstance(second, SmolStr):
             raise Exception('Internal error - this should never happen.')
-        
+
         return SmolStr(first.value + second.value)
 
     if isinstance(ast, HTML):
@@ -153,7 +155,7 @@ def eval_smol_template(ast: SmolNode, filepath: str, params: Dict[str, Any]):
     if isinstance(ast, IndexAccess):
         lst = eval_smol_template(ast.lst, filepath, params)
         if not isinstance(lst, SmolList):
-            raise Exception('{} must be a list to access index {}!'.format(lst, ast.field))
+            raise Exception('{} must be a list!'.format(lst))
         if ast.index > len(lst.elements):
             raise Exception('Index {} out of range!'.format(ast.index))
         return lst.elements[ast.index]
@@ -161,9 +163,10 @@ def eval_smol_template(ast: SmolNode, filepath: str, params: Dict[str, Any]):
     if isinstance(ast, FieldAccess):
         obj = eval_smol_template(ast.obj, filepath, params)
         if not isinstance(obj, SmolObj):
-            raise Exception('{} must be an object to access field {}!'.format(obj, ast.field))
+            raise Exception('{} must be an object!'.format(obj))
         if ast.field not in obj.fields:
-            raise Exception('Field {} does not exist!'.format(ast.field))
+            raise Exception('Field {} does not exist - available fields are {}'.format(
+                ast.field, obj.fields.keys()))
         return obj.fields[ast.field]
 
     if isinstance(ast, Call):
@@ -171,7 +174,7 @@ def eval_smol_template(ast: SmolNode, filepath: str, params: Dict[str, Any]):
         if not isinstance(fn, SmolFn):
             raise Exception('{} is not a function, and cannot be called!'.format(fn))
         args = [eval_smol_template(arg, filepath, params) for arg in ast.args]
-        return fn.fn(*args)
+        return fn.fn(filepath, params, *args)
 
     if isinstance(ast, For):
         iterator = eval_smol_template(ast.iterator, filepath, params)
