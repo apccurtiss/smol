@@ -2,12 +2,12 @@ from datetime import datetime, timedelta
 import json
 import logging
 import os
+import shutil
 import sys
-import time
 
 import argparse
 from httpwatcher import HttpWatcherServer
-import shutil
+from tornado.ioloop import IOLoop
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
@@ -119,8 +119,7 @@ def main():
             server.listen()
             print('[*] Serving from http://{}:{}'.format(host, port))
 
-        while True:
-            time.sleep(1)
+        IOLoop.current().start()
     except KeyboardInterrupt:
         print('[*] Shutting down...')
         observer.stop()
