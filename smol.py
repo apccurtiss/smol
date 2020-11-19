@@ -1,11 +1,12 @@
 import json
 import logging
 import os
-from pathlib import PurePath
 import re
 import time
 
 import argparse
+from httpwatcher import HttpWatcherServer
+from tornado.ioloop import IOLoop
 import shutil
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
@@ -13,6 +14,8 @@ from watchdog.events import FileSystemEventHandler
 from lib.smol_lang import eval_smol_template, parse_smol_file
 
 logging.basicConfig()
+logging.getLogger('tornado').setLevel(logging.ERROR)
+
 
 def read_headers(text):
     """Parse headers and return the index where they end."""
@@ -70,6 +73,8 @@ def main():
     parser = argparse.ArgumentParser(description='Build a website!')
     parser.add_argument('-r', '--root', nargs='?', action='store', default='.',
                         help='source root directory')
+    parser.add_argument('--serve', action='store_true', default=False,
+                        help='serve the completed site from a local webserver')
     parser.add_argument('-o', '--out', action='store', nargs='?', default='./_site',
                         help='output folder')
     parser.add_argument('-s', '--static', action='store', nargs='*', default=[],
@@ -116,13 +121,31 @@ def main():
     observer.schedule(Handler(), params['root'], recursive=True)
 
     # Start the observer
-    observer.start()
     try:
+        observer.start()
         print('[*] Watching for changes...')
-        while True:
-            time.sleep(1)
+
+        server = None
+        if args.serve:
+            host = 'localhost'
+            port = 8000
+            server = HttpWatcherServer(
+                params['out'],
+                watch_paths=[params['out']],
+                host=host,
+                port=port,
+                watcher_interval=1.0,
+                recursive=True,
+                open_browser=False)
+            server.listen()
+            print('[*] Serving from http://{}:{}'.format(host, port))
+
+        IOLoop.current().start()
     except KeyboardInterrupt:
         observer.stop()
+        if server:
+            server.shutdown()
+
     observer.join()
 
 
