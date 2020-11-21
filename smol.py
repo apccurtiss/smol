@@ -4,11 +4,9 @@ Smol, an unopinionated static site generator.
 from datetime import datetime, timedelta
 import json
 import logging
-import os
 from pathlib import Path
 import re
 import shutil
-import sys
 import time
 from typing import Any, Dict
 
@@ -19,12 +17,13 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
 from jinja2 import Template
+from jinja2.exceptions import TemplateError
 
 logging.basicConfig()
 logging.getLogger('tornado').setLevel(logging.ERROR)
 
 
-Environment: Dict[str, Any]
+Environment = Dict[str, Any]
 
 
 def separate_headers(file_content: str):
@@ -51,12 +50,16 @@ def build_page(filepath: Path, destination: Path, environment: Environment):
     '''
     if filepath.suffix in ['.html']:
         headers, content = separate_headers(filepath.read_text())
-        
-        output = Template(content).render({**environment, **headers}).encode()
+
+        try:
+            output = Template(content).render({**environment, **headers}).encode()
+        except TemplateError as err:
+            print('[!] Unable to compile {}: {}'.format(filepath, err))
+            return
     else:
         output = filepath.read_bytes()
 
-    destination.mkdir(parents=True, exist_ok=True)
+    destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_bytes(output)
 
 
@@ -71,26 +74,73 @@ def build_site(target: Path, output_path: Path, environment: Environment):
     Returns:
         A list of the files built
     '''
-    watchpaths = []
+    watchpaths = {}
 
-    for filepath in target.glob('**/*'):
-        destination = output_path.joinpath(filepath)
-        build_page(filepath, destination, environment)
-        watchpaths.append(filepath)
+    for filepath in target.rglob('*'):
+        if filepath.is_file() and output_path not in filepath.parents:
+            destination = output_path.joinpath(filepath)
+            build_page(filepath, destination, environment)
+            watchpaths[filepath] = datetime.now()
 
     return watchpaths
 
+
+def build_observer(watchpaths: Dict[str, datetime], environment: Environment):
+    class WatchHandler(FileSystemEventHandler):
+        '''Rebuilds pages that get modified'''
+        @staticmethod
+        def on_any_event(event):
+            filepath = Path(event.src_path)
+            if event.event_type == 'modified' and filepath in watchpaths:
+                # Skip duplicate events that are within a second of each other
+                if datetime.now() - watchpaths.get(filepath) < timedelta(seconds=1):
+                    return
+
+                print(f'[*] Recompiling {filepath}')
+                build_page(
+                    filepath,
+                    Path(environment['out']).joinpath(filepath),
+                    environment)
+                watchpaths[filepath] = datetime.now()
+
+    observer = Observer()
+    observer.schedule(WatchHandler(), str(environment['root']), recursive=True)
+    return observer
+
+
+def build_server(path, port, open_browser):
+    server = HttpWatcherServer(
+        path,
+        watch_paths=[path],
+        host='localhost',
+        port=port,
+        watcher_interval=1.0,
+        recursive=True,
+        open_browser=open_browser)
+
+    return server
+
 def main():
     '''Parses args'''
-    parser = argparse.ArgumentParser(description='Build a website!')
-    parser.add_argument('-r', '--root', nargs='?', action='store', default='.',
+    common = argparse.ArgumentParser()
+    common.add_argument('-r', '--root', nargs='?', action='store', default='.',
                         help='source root directory')
-    parser.add_argument('--serve', action='store_true', default=False,
-                        help='serve the completed site from a local webserver')
-    parser.add_argument('-o', '--out', action='store', nargs='?', default='./_site',
+    common.add_argument('-o', '--out', action='store', nargs='?', default='./_site',
                         help='output folder')
-    parser.add_argument('-s', '--static', action='store', nargs='*', default=[],
-                        help='static directories will be copied without modification')
+    common.add_argument('-s', '--static', action='store', nargs='*', default=[],
+                        help='static directories that will be copied without modification')
+
+    parser = argparse.ArgumentParser()
+    subparsers = parser.add_subparsers(title='commands', dest='action')
+
+    _build = subparsers.add_parser('build', add_help=False, parents=[common])
+    _watch = subparsers.add_parser('watch', add_help=False, parents=[common])
+    serve = subparsers.add_parser('serve', add_help=False, parents=[common])
+
+    serve.add_argument('--open-browser', action='store_true', default=False,
+                       help='automatically open a browser tab')
+    serve.add_argument('-p', '--port', action='store', type=int, default=8000,
+                       help='custom port number')
 
     args = parser.parse_args()
 
@@ -102,7 +152,7 @@ def main():
     }
 
     # If smol.json exists, load it.
-    config_path = args.root.joinpath('smol.json')
+    config_path = environment['root'].joinpath('smol.json')
     if config_path.is_file():
         environment.update(json.loads(config_path.read_text()))
 
@@ -120,46 +170,26 @@ def main():
     watchpaths = build_site(environment['root'], environment['out'], environment)
     print('[*] Compilation successful')
 
-    class WatchHandler(FileSystemEventHandler):
-        '''Rebuilds pages that get modified'''
-        @staticmethod
-        def on_any_event(event):
-            if event.event_type == 'modified' and event.src_path in watchpaths:
-                # Skip duplicate events that are within a second of each other
-                if datetime.now() - cache.get(event.src_path).updated < timedelta(seconds=1):
-                    return
+    if args.action == 'build':
+        return
 
-                print(f'[*] Recompiling {event.src_path}')
-                build_page(event.src_path, os.path.join(environment['out'], event.src_path), environment)
-
-    # Initialize Observer
-    observer = Observer()
-    observer.schedule(WatchHandler(), environment['root'], recursive=True)
-
-    # Start the observer
     try:
+        observer = build_observer(watchpaths, environment)
         observer.start()
         print('[*] Watching for changes...')
 
-        server = None
-        if args.serve:
-            host = 'localhost'
-            port = 8000
-            server = HttpWatcherServer(
-                environment['out'],
-                watch_paths=[environment['out']],
-                host=host,
-                port=port,
-                watcher_interval=1.0,
-                recursive=True,
-                open_browser=False)
+        if args.action == 'serve':
+            server = build_server(environment['out'], args.port, args.open_browser)
             server.listen()
-            print('[*] Serving from http://{}:{}'.format(host, port))
+            print('[*] Serving from http://localhost:{}'.format(args.port))
 
             IOLoop.current().start()
 
-        while True:
-            time.sleep(1)
+        else:
+            server = None
+            while True:
+                time.sleep(1)
+
     except KeyboardInterrupt:
         print('[*] Shutting down...')
         observer.stop()
@@ -167,7 +197,6 @@ def main():
             server.shutdown()
 
     observer.join()
-    sys.exit(0)
 
 
 if __name__ == '__main__':
