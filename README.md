@@ -21,7 +21,7 @@ Contents
 Usage
 ------------
 
-Smol traverses the entire source directory, and will compile every `.html` file it finds there. It does this using Jinja2 templates, which get their variables from two places:
+Smol traverses the entire source directory, and will compile every `.html` file it finds there. It does this using Jinja2 templates, which get their variables from three places:
 
 1. A global environment which you can populate by putting `smol.json` in the root of the source directory.
 2. A page-specific header that looks like:
@@ -31,7 +31,7 @@ Smol traverses the entire source directory, and will compile every `.html` file 
    <!-- var_two: bar -->
    ```
 
-3. Finally, you can use the `list_files(filepath)` command to retrieve the urls and headers of other files at a specified path.
+3. Finally, you can use the `list_files(filepath)` command to retrieve the headers of other files at a specified path. This does introduce one unavoidable magic variable, the `url` attribute, which will be included along with the headers for each file found.
 
 As an example:
 
@@ -63,6 +63,28 @@ This is my first blog post.
    {% for post in list_files('posts') %}
    <a href={{ post.url }}>{{ post.title }}</a>
    {% endfor %}
+</body>
+```
+
+...would compile into
+
+*posts/post_1.html*
+```
+This is my first blog post.
+```
+
+*index.html*
+```
+<html>
+<meta name="keywords" content="Coding, Blog">
+<meta name="author" content="Sunaina">
+<head>
+  <title>Blog</title>
+</head>
+<body>
+   Welcome to my blog!
+
+   <a href="posts/post_1.html">My first blog post!</a>
 </body>
 ```
 
