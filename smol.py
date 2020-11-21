@@ -12,47 +12,49 @@ from typing import Any, Dict
 
 import argparse
 from httpwatcher import HttpWatcherServer
+from jinja2 import Template
+from jinja2.exceptions import TemplateError
 from tornado.ioloop import IOLoop
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
-from jinja2 import Template
-from jinja2.exceptions import TemplateError
+from lib.smol_cache import cache
 
 logging.basicConfig()
 logging.getLogger('tornado').setLevel(logging.ERROR)
 
-
 Environment = Dict[str, Any]
 
+# def separate_headers(file_content: str):
+#     """Parse headers and return the index where they end."""
+#     headers = {}
+#     end = 0
+#     for match in re.finditer(r'\s*<!--\s*(.+?)\s*:\s*(.+?)\s*-->\s*', file_content):
+#         if not match.group(1):
+#             break
 
-def separate_headers(file_content: str):
-    """Parse headers and return the index where they end."""
-    headers = {}
-    end = 0
-    for match in re.finditer(r'\s*<!--\s*(.+?)\s*:\s*(.+?)\s*-->\s*', file_content):
-        if not match.group(1):
-            break
+#         headers[match.group(1)] = match.group(2)
+#         end = match.end()
 
-        headers[match.group(1)] = match.group(2)
-        end = match.end()
-
-    return headers, file_content[end:]
+#     return headers, file_content[end:]
 
 
-def build_page(filepath: Path, destination: Path, environment: Environment):
+def build_page(filepath: Path, destination: Path, env: Environment, invalidate_cache=False):
     '''Builds and saves a single page.
 
     Params:
         filepath: Source filepath
         destination: Destination filepath
-        environment: Param dict
+        env: Environment dictionary
+        invalidate_cache: Use cached version of the file
     '''
     if filepath.suffix in ['.html']:
-        headers, content = separate_headers(filepath.read_text())
+        cached_file = cache.get(filepath, invalidate_cache)
+        # headers, content = separate_headers(filepath.read_text())
 
         try:
-            output = Template(content).render({**environment, **headers}).encode()
+            output = Template(cached_file.content).render(
+                {**env, **cached_file.headers}).encode()
         except TemplateError as err:
             print('[!] Unable to compile {}: {}'.format(filepath, err))
             return
@@ -100,7 +102,8 @@ def build_observer(watchpaths: Dict[str, datetime], environment: Environment):
                 build_page(
                     filepath,
                     Path(environment['out']).joinpath(filepath),
-                    environment)
+                    environment,
+                    invalidate_cache=True)
                 watchpaths[filepath] = datetime.now()
 
     observer = Observer()
@@ -119,6 +122,21 @@ def build_server(path, port, open_browser):
         open_browser=open_browser)
 
     return server
+
+
+def list_files(filepath: str):
+    def parse_file(filepath):
+        print({
+            'url': str(filepath),
+            **cache.get(filepath).headers
+        })
+        return {
+            'url': str(filepath),
+            **cache.get(filepath).headers
+        }
+
+    return [parse_file(f) for f in Path(filepath).glob('*') if f.is_file()]
+
 
 def main():
     '''Parses args'''
@@ -149,6 +167,7 @@ def main():
         'root': Path(args.root),
         'out': Path(args.out),
         'static_dirs': map(Path, args.static),
+        'list_files': list_files
     }
 
     # If smol.json exists, load it.
