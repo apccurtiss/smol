@@ -5,9 +5,12 @@ from datetime import datetime, timedelta
 import json
 import logging
 import os
+from pathlib import Path
+import re
 import shutil
 import sys
 import time
+from typing import Any, Dict
 
 import argparse
 from httpwatcher import HttpWatcherServer
@@ -15,58 +18,70 @@ from tornado.ioloop import IOLoop
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
-from lib.smol_cache import cache
-from lib.smol_lang import eval_smol_template, parse_smol_file
+from jinja2 import Template
 
 logging.basicConfig()
 logging.getLogger('tornado').setLevel(logging.ERROR)
 
 
-def build_page(filepath, destination, global_params):
+Environment: Dict[str, Any]
+
+
+def separate_headers(file_content: str):
+    """Parse headers and return the index where they end."""
+    headers = {}
+    end = 0
+    for match in re.finditer(r'\s*<!--\s*(.+?)\s*:\s*(.+?)\s*-->\s*', file_content):
+        if not match.group(1):
+            break
+
+        headers[match.group(1)] = match.group(2)
+        end = match.end()
+
+    return headers, file_content[end:]
+
+
+def build_page(filepath: Path, destination: Path, environment: Environment):
     '''Builds and saves a single page.
 
     Params:
         filepath: Source filepath
         destination: Destination filepath
-        global_params: Param dict
+        environment: Param dict
     '''
-    file_obj = cache.get(filepath, invalidate=True)
-
-    if file_obj.is_html:
-        global_params.update(file_obj.headers)
-        template = parse_smol_file(file_obj.content)
-        output = eval_smol_template(template, filepath, global_params).value.encode()
+    if filepath.suffix in ['.html']:
+        headers, content = separate_headers(filepath.read_text())
+        
+        output = Template(content).render({**environment, **headers}).encode()
     else:
-        output = file_obj.content
+        output = filepath.read_bytes()
 
-    os.makedirs(os.path.dirname(destination), exist_ok=True)
-    with open(destination, 'wb') as outfile:
-        outfile.write(output)
+    destination.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(output)
 
-def build_site(target, output_path, params):
+
+def build_site(target: Path, output_path: Path, environment: Environment):
     '''Recursively builds a given directory.
 
     Params:
         target: Source directory
         output_path: Destination directory
-        params: Param dict
+        environment: Param dict
 
     Returns:
         A list of the files built
     '''
     watchpaths = []
 
-    for (dirpath, _dirnames, filenames) in os.walk(target):
-        for filename in filenames:
-            source = os.path.join(dirpath, filename)
-            destination = os.path.join(output_path, source)
-            build_page(source, destination, params)
-            watchpaths.append(source)
+    for filepath in target.glob('**/*'):
+        destination = output_path.joinpath(filepath)
+        build_page(filepath, destination, environment)
+        watchpaths.append(filepath)
 
     return watchpaths
 
 def main():
-    '''Parses args and runs accordingly'''
+    '''Parses args'''
     parser = argparse.ArgumentParser(description='Build a website!')
     parser.add_argument('-r', '--root', nargs='?', action='store', default='.',
                         help='source root directory')
@@ -80,29 +95,29 @@ def main():
     args = parser.parse_args()
 
     # Use argument parameters.
-    params = {
-        'root': args.root,
-        'out': args.out,
-        'static_dirs': args.static,
+    environment = {
+        'root': Path(args.root),
+        'out': Path(args.out),
+        'static_dirs': map(Path, args.static),
     }
 
     # If smol.json exists, load it.
-    if os.path.isfile(os.path.join(args.root, 'smol.json')):
-        with open('smol.json') as infile:
-            params.update(json.loads(infile.read()))
+    config_path = args.root.joinpath('smol.json')
+    if config_path.is_file():
+        environment.update(json.loads(config_path.read_text()))
 
     # Create output directory.
-    if os.path.isdir(params['out']):
-        shutil.rmtree(params['out'])
+    if environment['out'].is_dir():
+        shutil.rmtree(environment['out'])
 
-    for static_dir in params['static_dirs']:
-        if not os.path.isdir(static_dir):
+    for static_dir in environment['static_dirs']:
+        if not static_dir.is_dir():
             raise Exception('Directory does not exist: {}'.format(static_dir))
 
-        shutil.copytree(static_dir, params['out'])
+        shutil.copytree(static_dir, environment['out'])
 
     # Write!
-    watchpaths = build_site(params['root'], params['out'], params)
+    watchpaths = build_site(environment['root'], environment['out'], environment)
     print('[*] Compilation successful')
 
     class WatchHandler(FileSystemEventHandler):
@@ -115,11 +130,11 @@ def main():
                     return
 
                 print(f'[*] Recompiling {event.src_path}')
-                build_page(event.src_path, os.path.join(params['out'], event.src_path), params)
+                build_page(event.src_path, os.path.join(environment['out'], event.src_path), environment)
 
     # Initialize Observer
     observer = Observer()
-    observer.schedule(WatchHandler(), params['root'], recursive=True)
+    observer.schedule(WatchHandler(), environment['root'], recursive=True)
 
     # Start the observer
     try:
@@ -131,8 +146,8 @@ def main():
             host = 'localhost'
             port = 8000
             server = HttpWatcherServer(
-                params['out'],
-                watch_paths=[params['out']],
+                environment['out'],
+                watch_paths=[environment['out']],
                 host=host,
                 port=port,
                 watcher_interval=1.0,
