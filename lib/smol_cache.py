@@ -1,10 +1,10 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 import os
+from pathlib import Path
 import re
 from typing import Dict
 
-from lib.smol_ast import SmolStr
 
 @dataclass
 class SmolFile:
@@ -12,12 +12,12 @@ class SmolFile:
     content: str
     updated: datetime = field(default_factory=datetime.now)
     headers: Dict[str, str] = field(default_factory=dict)
-    is_html: bool = field(default=False)
+
 
 class SmolFileCache:
     cache = {}
 
-    def _parse_headers(self, text):
+    def _parse_headers(self, text: str):
         """Parse headers and return the index where they end."""
         headers = {}
         end = 0
@@ -25,34 +25,30 @@ class SmolFileCache:
             if not match.group(1):
                 break
 
-            headers[match.group(1)] = SmolStr(match.group(2))
+            headers[match.group(1)] = match.group(2)
             end = match.end()
 
         return headers, end
 
-    def _load(self, filepath):
+    def _load(self, filepath: Path):
         """Read headers and content from a file."""
-        if filepath.endswith('.html'):
-            with open(filepath) as f:
-                content = f.read()
+        if filepath.suffix in ['.html']:
+            content = filepath.read_text()
 
             headers, end = self._parse_headers(content)
             # Separate content from headers.
             content = content[end:]
-            return SmolFile(path=filepath, content=content, headers=headers, is_html=True)
+            return SmolFile(path=filepath, content=content, headers=headers)
 
         else:
-            with open(filepath, 'rb') as f:
-                content = f.read()
+            filepath.read_bytes()
 
             return SmolFile(path=filepath, content=content)
 
     def get(self, filepath, invalidate=False):
-        norm_filepath = os.path.normpath(filepath)
+        if invalidate or filepath not in self.cache:
+            self.cache[filepath] = self._load(filepath)
 
-        if invalidate or norm_filepath not in self.cache:
-            self.cache[norm_filepath] = self._load(norm_filepath)
-        
-        return self.cache[norm_filepath]
+        return self.cache[filepath]
 
 cache = SmolFileCache()
