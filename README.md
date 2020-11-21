@@ -19,7 +19,7 @@ Contents
 
 
 Usage
-------------
+-----
 
 Smol traverses the entire source directory, and will compile every `.html` file it finds there. It does this using Jinja2 templates, which get their variables from three places:
 

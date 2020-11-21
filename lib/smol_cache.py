@@ -3,7 +3,7 @@ from datetime import datetime
 import os
 from pathlib import Path
 import re
-from typing import Dict
+from typing import Dict, Optional, Set, Tuple
 
 
 @dataclass
@@ -12,13 +12,18 @@ class SmolFile:
     content: str
     updated: datetime = field(default_factory=datetime.now)
     headers: Dict[str, str] = field(default_factory=dict)
+    dependancies: Set['SmolFile'] = field(default_factory=set)
 
 
 class SmolFileCache:
+    '''Caches files and headers, and remembers things like dependancies and update times.'''
     cache = {}
 
-    def _parse_headers(self, text: str):
-        """Parse headers and return the index where they end."""
+    def __contains__(self, other):
+        return other in self.cache.keys()
+
+    def _parse_headers(self, text: str) -> Tuple(Dict[str, str], int):
+        '''Parse headers and return the index where they end.'''
         headers = {}
         end = 0
         for match in re.finditer(r'\s*<!--\s*(.+?)\s*:\s*(.+?)\s*-->\s*', text):
@@ -30,24 +35,39 @@ class SmolFileCache:
 
         return headers, end
 
-    def _load(self, filepath: Path):
-        """Read headers and content from a file."""
+    def _load(self, filepath: Path, **attributes) -> SmolFile:
+        '''Read headers and content from a file.'''
         if filepath.suffix in ['.html']:
             content = filepath.read_text()
 
             headers, end = self._parse_headers(content)
             # Separate content from headers.
             content = content[end:]
-            return SmolFile(path=filepath, content=content, headers=headers)
+            return SmolFile(path=filepath, content=content, headers=headers, **attributes)
 
         else:
             filepath.read_bytes()
 
-            return SmolFile(path=filepath, content=content)
+            return SmolFile(path=filepath, content=content, **attributes)
 
-    def get(self, filepath, invalidate=False):
+    def get(self,
+        filepath: Path,
+        dependancy: Optional[Path]=None,
+        invalidate: bool=False)-> SmolFile:
+        '''Return a file. Loads it into the cache if it's not there already.
+        
+        Params:
+            filepath: The file to return.
+            dependancy: Another file that depends on this one. This will be recorded, so if this
+                file changes we can update the dependancy as well.
+            invalidate: Re-load this file, even if it already exists in the cache.
+        '''
         if invalidate or filepath not in self.cache:
-            self.cache[filepath] = self._load(filepath)
+            old_dependancies = self.cache[filepath].dependancies
+            self.cache[filepath] = self._load(filepath, dependancies=old_dependancies)
+
+        if dependancy is not None:
+            self.cache[filepath].dependancies.add(dependancy)
 
         return self.cache[filepath]
 

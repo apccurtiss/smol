@@ -5,7 +5,6 @@ from datetime import datetime, timedelta
 import json
 import logging
 from pathlib import Path
-import re
 import shutil
 import time
 from typing import Any, Dict
@@ -19,24 +18,12 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
 from lib.smol_cache import cache
+from lib.smol_runtime import build_runtime
 
 logging.basicConfig()
 logging.getLogger('tornado').setLevel(logging.ERROR)
 
 Environment = Dict[str, Any]
-
-# def separate_headers(file_content: str):
-#     """Parse headers and return the index where they end."""
-#     headers = {}
-#     end = 0
-#     for match in re.finditer(r'\s*<!--\s*(.+?)\s*:\s*(.+?)\s*-->\s*', file_content):
-#         if not match.group(1):
-#             break
-
-#         headers[match.group(1)] = match.group(2)
-#         end = match.end()
-
-#     return headers, file_content[end:]
 
 
 def build_page(filepath: Path, destination: Path, env: Environment, invalidate_cache=False):
@@ -54,7 +41,11 @@ def build_page(filepath: Path, destination: Path, env: Environment, invalidate_c
 
         try:
             output = Template(cached_file.content).render(
-                {**env, **cached_file.headers}).encode()
+                {
+                    **env,
+                    **cached_file.headers,
+                    **build_runtime(filepath)
+                }).encode()
         except TemplateError as err:
             print('[!] Unable to compile {}: {}'.format(filepath, err))
             return
@@ -90,21 +81,29 @@ def build_site(target: Path, output_path: Path, environment: Environment):
 def build_observer(watchpaths: Dict[str, datetime], environment: Environment):
     class WatchHandler(FileSystemEventHandler):
         '''Rebuilds pages that get modified'''
+
+        def _rebuild(self, filepath: Path):
+            '''Rebuild the given path and everything that it depends on.'''
+            for dependancy in cache.get(filepath).dependancies:
+                print(f'[*] Also recompiling {} (required by {})', {dependancy, filepath}')
+                self._rebuild(dependancy)
+
+            build_page(
+                filepath,
+                Path(environment['out']).joinpath(filepath),
+                environment,
+                invalidate_cache=True)
+
+
         @staticmethod
         def on_any_event(event):
             filepath = Path(event.src_path)
-            if event.event_type == 'modified' and filepath in watchpaths:
+            if event.event_type == 'modified' and filepath in cache:
                 # Skip duplicate events that are within a second of each other
-                if datetime.now() - watchpaths.get(filepath) < timedelta(seconds=1):
-                    return
+                if datetime.now() - cache.get(filepath).updated > timedelta(seconds=1):
+                    print(f'[*] Recompiling{filepath}')
+                    self._rebuild(filepath)
 
-                print(f'[*] Recompiling {filepath}')
-                build_page(
-                    filepath,
-                    Path(environment['out']).joinpath(filepath),
-                    environment,
-                    invalidate_cache=True)
-                watchpaths[filepath] = datetime.now()
 
     observer = Observer()
     observer.schedule(WatchHandler(), str(environment['root']), recursive=True)
@@ -122,20 +121,6 @@ def build_server(path, port, open_browser):
         open_browser=open_browser)
 
     return server
-
-
-def list_files(filepath: str):
-    def parse_file(filepath):
-        print({
-            'url': str(filepath),
-            **cache.get(filepath).headers
-        })
-        return {
-            'url': str(filepath),
-            **cache.get(filepath).headers
-        }
-
-    return [parse_file(f) for f in Path(filepath).glob('*') if f.is_file()]
 
 
 def main():
@@ -167,7 +152,6 @@ def main():
         'root': Path(args.root),
         'out': Path(args.out),
         'static_dirs': map(Path, args.static),
-        'list_files': list_files
     }
 
     # If smol.json exists, load it.
@@ -216,7 +200,6 @@ def main():
             server.shutdown()
 
     observer.join()
-
 
 if __name__ == '__main__':
     main()
