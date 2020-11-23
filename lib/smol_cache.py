@@ -8,21 +8,21 @@ from typing import Dict, Optional, Set, Tuple
 
 @dataclass
 class SmolFile:
-    path: str
+    path: Path
     content: str
     updated: datetime = field(default_factory=datetime.now)
     headers: Dict[str, str] = field(default_factory=dict)
-    dependancies: Set['SmolFile'] = field(default_factory=set)
+    dependancies: Set[Path] = field(default_factory=set)
 
 
 class SmolFileCache:
     '''Caches files and headers, and remembers things like dependancies and update times.'''
-    cache = {}
+    cache: Dict[Path, SmolFile] = {}
 
     def __contains__(self, other):
         return other in self.cache.keys()
 
-    def _parse_headers(self, text: str) -> Tuple(Dict[str, str], int):
+    def _parse_headers(self, text: str) -> Tuple[Dict[str, str], int]:
         '''Parse headers and return the index where they end.'''
         headers = {}
         end = 0
@@ -62,7 +62,10 @@ class SmolFileCache:
                 file changes we can update the dependancy as well.
             invalidate: Re-load this file, even if it already exists in the cache.
         '''
-        if invalidate or filepath not in self.cache:
+        if filepath not in self.cache:
+            self.cache[filepath] = self._load(filepath)
+
+        elif invalidate:
             old_dependancies = self.cache[filepath].dependancies
             self.cache[filepath] = self._load(filepath, dependancies=old_dependancies)
 

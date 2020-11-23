@@ -36,15 +36,14 @@ def build_page(filepath: Path, destination: Path, env: Environment, invalidate_c
         invalidate_cache: Use cached version of the file
     '''
     if filepath.suffix in ['.html']:
-        cached_file = cache.get(filepath, invalidate_cache)
-        # headers, content = separate_headers(filepath.read_text())
+        cached_file = cache.get(filepath, invalidate=invalidate_cache)
 
         try:
             output = Template(cached_file.content).render(
                 {
                     **env,
                     **cached_file.headers,
-                    **build_runtime(filepath)
+                    **build_runtime(filepath, env['root'])
                 }).encode()
         except TemplateError as err:
             print('[!] Unable to compile {}: {}'.format(filepath, err))
@@ -63,36 +62,29 @@ def build_site(target: Path, output_path: Path, environment: Environment):
         target: Source directory
         output_path: Destination directory
         environment: Param dict
-
-    Returns:
-        A list of the files built
     '''
-    watchpaths = {}
-
     for filepath in target.rglob('*'):
         if filepath.is_file() and output_path not in filepath.parents:
             destination = output_path.joinpath(filepath)
             build_page(filepath, destination, environment)
-            watchpaths[filepath] = datetime.now()
-
-    return watchpaths
 
 
-def build_observer(watchpaths: Dict[str, datetime], environment: Environment):
+def build_observer(environment: Environment):
     class WatchHandler(FileSystemEventHandler):
         '''Rebuilds pages that get modified'''
 
-        def _rebuild(self, filepath: Path):
+        @staticmethod
+        def _rebuild(filepath: Path):
             '''Rebuild the given path and everything that it depends on.'''
-            for dependancy in cache.get(filepath).dependancies:
-                print(f'[*] Also recompiling {} (required by {})', {dependancy, filepath}')
-                self._rebuild(dependancy)
-
             build_page(
                 filepath,
                 Path(environment['out']).joinpath(filepath),
                 environment,
                 invalidate_cache=True)
+
+            for dependancy in cache.get(filepath).dependancies:
+                print('[*] Updating dependancy: {}'.format(dependancy))
+                WatchHandler._rebuild(dependancy)
 
 
         @staticmethod
@@ -101,8 +93,8 @@ def build_observer(watchpaths: Dict[str, datetime], environment: Environment):
             if event.event_type == 'modified' and filepath in cache:
                 # Skip duplicate events that are within a second of each other
                 if datetime.now() - cache.get(filepath).updated > timedelta(seconds=1):
-                    print(f'[*] Recompiling{filepath}')
-                    self._rebuild(filepath)
+                    print(f'[*] Recompiling {filepath}')
+                    WatchHandler._rebuild(filepath)
 
 
     observer = Observer()
@@ -126,7 +118,7 @@ def build_server(path, port, open_browser):
 def main():
     '''Parses args'''
     common = argparse.ArgumentParser()
-    common.add_argument('-r', '--root', nargs='?', action='store', default='.',
+    common.add_argument('root', nargs='?', action='store', default='.',
                         help='source root directory')
     common.add_argument('-o', '--out', action='store', nargs='?', default='./_site',
                         help='output folder')
@@ -170,14 +162,14 @@ def main():
         shutil.copytree(static_dir, environment['out'])
 
     # Write!
-    watchpaths = build_site(environment['root'], environment['out'], environment)
+    build_site(environment['root'], environment['out'], environment)
     print('[*] Compilation successful')
 
     if args.action == 'build':
         return
 
     try:
-        observer = build_observer(watchpaths, environment)
+        observer = build_observer(environment)
         observer.start()
         print('[*] Watching for changes...')
 
