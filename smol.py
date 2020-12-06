@@ -11,7 +11,7 @@ from typing import Any, Dict
 
 import argparse
 from httpwatcher import HttpWatcherServer
-from jinja2 import Template
+import jinja2
 from jinja2.exceptions import TemplateError
 from tornado.ioloop import IOLoop
 from watchdog.observers import Observer
@@ -23,28 +23,50 @@ from lib.smol_runtime import build_runtime
 logging.basicConfig()
 logging.getLogger('tornado').setLevel(logging.ERROR)
 
-Environment = Dict[str, Any]
+
+class FileLoader(jinja2.BaseLoader):
+    def __init__(self, root):
+        self.root = Path(root)
+
+    def get_source(self, environment, template):
+        path = self.root.joinpath(template)
+        file_obj = cache.get(path)
+
+        return file_obj.content, str(path), lambda: file_obj.updated == cache.get(path).updated
 
 
-def build_page(filepath: Path, destination: Path, env: Environment, invalidate_cache=False):
+class Environment:
+    params: Dict[str, Any] = {}
+
+    def __init__(self, input_root, output_root, static_dirs):
+        self.input_root = input_root
+        self.output_root = output_root
+        self.static_dirs = static_dirs
+
+        self._jinja_env = jinja2.Environment(loader=FileLoader(input_root))
+
+    def get_template(self, path: Path):
+        return self._jinja_env.get_template(path)
+    
+    def update(self, new_params):
+        self.params.update(new_params)
+
+
+def build_page(filepath: Path, destination: Path, env: Environment):
     '''Builds and saves a single page.
 
     Params:
         filepath: Source filepath
         destination: Destination filepath
         env: Environment dictionary
-        invalidate_cache: Use cached version of the file
     '''
     if filepath.suffix in ['.html']:
-        cached_file = cache.get(filepath, invalidate=invalidate_cache)
-
         try:
-            output = Template(cached_file.content).render(
-                {
-                    **env,
-                    **cached_file.headers,
-                    **build_runtime(filepath, env['root'])
-                }).encode()
+            output = env.get_template(filepath).render({
+                **env.params,
+                **cache.get(filepath).headers,
+                **build_runtime(filepath, env.input_root)
+            }).encode()
         except TemplateError as err:
             print('[!] Unable to compile {}: {}'.format(filepath, err))
             return
@@ -76,11 +98,12 @@ def build_observer(environment: Environment):
         @staticmethod
         def _rebuild(filepath: Path):
             '''Rebuild the given path and everything that it depends on.'''
+            cache.update(filepath)
+
             build_page(
                 filepath,
-                Path(environment['out']).joinpath(filepath),
-                environment,
-                invalidate_cache=True)
+                Path(environment.output_root).joinpath(filepath),
+                environment)
 
             for dependancy in cache.get(filepath).dependancies:
                 print('[*] Updating dependancy: {}'.format(dependancy))
@@ -98,7 +121,7 @@ def build_observer(environment: Environment):
 
 
     observer = Observer()
-    observer.schedule(WatchHandler(), str(environment['root']), recursive=True)
+    observer.schedule(WatchHandler(), str(environment.input_root), recursive=True)
     return observer
 
 
@@ -140,29 +163,29 @@ def main():
     args = parser.parse_args()
 
     # Use argument parameters.
-    environment = {
-        'root': Path(args.root),
-        'out': Path(args.out),
-        'static_dirs': map(Path, args.static),
-    }
+    environment = Environment(
+        input_root=Path(args.root),
+        output_root=Path(args.out),
+        static_dirs=map(Path, args.static)
+    )
 
     # If smol.json exists, load it.
-    config_path = environment['root'].joinpath('smol.json')
+    config_path = environment.input_root.joinpath('smol.json')
     if config_path.is_file():
         environment.update(json.loads(config_path.read_text()))
 
     # Create output directory.
-    if environment['out'].is_dir():
-        shutil.rmtree(environment['out'])
+    if environment.output_root.is_dir():
+        shutil.rmtree(environment.output_root)
 
-    for static_dir in environment['static_dirs']:
+    for static_dir in environment.static_dirs:
         if not static_dir.is_dir():
             raise Exception('Directory does not exist: {}'.format(static_dir))
 
-        shutil.copytree(static_dir, environment['out'])
+        shutil.copytree(static_dir, environment.output_root)
 
     # Write!
-    build_site(environment['root'], environment['out'], environment)
+    build_site(environment.input_root, environment.output_root, environment)
     print('[*] Compilation successful')
 
     if args.action == 'build':
@@ -174,7 +197,7 @@ def main():
         print('[*] Watching for changes...')
 
         if args.action == 'serve':
-            server = build_server(environment['out'], args.port, args.open_browser)
+            server = build_server(environment.output_root, args.port, args.open_browser)
             server.listen()
             print('[*] Serving from http://localhost:{}'.format(args.port))
 

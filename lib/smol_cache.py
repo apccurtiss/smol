@@ -35,7 +35,7 @@ class SmolFileCache:
 
         return headers, end
 
-    def _load(self, filepath: Path, **attributes) -> SmolFile:
+    def _load(self, filepath: Path) -> SmolFile:
         '''Read headers and content from a file.'''
         if filepath.suffix in ['.html']:
             content = filepath.read_text()
@@ -43,17 +43,23 @@ class SmolFileCache:
             headers, end = self._parse_headers(content)
             # Separate content from headers.
             content = content[end:]
-            return SmolFile(path=filepath, content=content, headers=headers, **attributes)
+            return SmolFile(path=filepath, content=content, headers=headers)
 
         else:
             filepath.read_bytes()
 
-            return SmolFile(path=filepath, content=content, **attributes)
+            return SmolFile(path=filepath, content=content)
+
+
+    def update(self, filepath: Path):
+        old_dependancies = self.cache[filepath].dependancies
+        self.cache[filepath] = self._load(filepath)
+        self.cache[filepath].dependancies = old_dependancies
+
 
     def get(self,
         filepath: Path,
-        dependancy: Optional[Path]=None,
-        invalidate: bool=False)-> SmolFile:
+        dependancy: Optional[Path]=None)-> SmolFile:
         '''Return a file. Loads it into the cache if it's not there already.
         
         Params:
@@ -64,13 +70,6 @@ class SmolFileCache:
         '''
         if filepath not in self.cache:
             self.cache[filepath] = self._load(filepath)
-
-        elif invalidate:
-            old_dependancies = self.cache[filepath].dependancies
-            self.cache[filepath] = self._load(filepath, dependancies=old_dependancies)
-
-        if dependancy is not None:
-            self.cache[filepath].dependancies.add(dependancy)
 
         return self.cache[filepath]
 

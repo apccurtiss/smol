@@ -5,9 +5,11 @@ from lib.smol_cache import cache
 
 def list_files(filepath: str, root: Path, origin: Path):
     def build_return(filepath):
+        cached_file = cache.get(filepath)
+        cached_file.dependancies.add(origin)
         return {
             'url': filepath.resolve().relative_to(root.resolve()),
-            **cache.get(filepath, dependancy=origin).headers
+            **cached_file.headers
         }
 
     searchpath = origin.parent.joinpath(filepath)
